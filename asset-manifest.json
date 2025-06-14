@@ -1,13 +1,13 @@
 {
   "files": {
-    "main.css": "/my-job-tracker/static/css/main.378c55ae.css",
-    "main.js": "/my-job-tracker/static/js/main.feb7e745.js",
+    "main.css": "/my-job-tracker/static/css/main.988f0d28.css",
+    "main.js": "/my-job-tracker/static/js/main.8c0583a2.js",
     "index.html": "/my-job-tracker/index.html",
-    "main.378c55ae.css.map": "/my-job-tracker/static/css/main.378c55ae.css.map",
-    "main.feb7e745.js.map": "/my-job-tracker/static/js/main.feb7e745.js.map"
+    "main.988f0d28.css.map": "/my-job-tracker/static/css/main.988f0d28.css.map",
+    "main.8c0583a2.js.map": "/my-job-tracker/static/js/main.8c0583a2.js.map"
   },
   "entrypoints": [
-    "static/css/main.378c55ae.css",
-    "static/js/main.feb7e745.js"
+    "static/css/main.988f0d28.css",
+    "static/js/main.8c0583a2.js"
   ]
 }
