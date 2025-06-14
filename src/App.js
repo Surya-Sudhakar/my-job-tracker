@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import {
   getAuth,
   onAuthStateChanged,
-  createUserWithEmailAndPassword, // For user registration
-  signInWithEmailAndPassword,     // For user login
-  signOut,                        // For user logout
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut,
 } from 'firebase/auth';
 import {
   getFirestore,
@@ -31,15 +31,266 @@ const firebaseConfig = {
   measurementId: "G-3R91XH30M9"
 };
 
-// For Firestore collection path, we'll use the projectId as a unique app identifier
-const appId = firebaseConfig.projectId;
+const appId = firebaseConfig.projectId; // Using projectId as app identifier for Firestore paths
 
-// Main App component for the Job Tracker
+// Custom Modal Component for Alerts/Confirmations
+const CustomModal = ({ message, type, onConfirm, onCancel }) => {
+  if (!message) return null;
+
+  const isConfirm = type === 'confirm';
+  const isAlert = type === 'alert';
+
+  return (
+    <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-[100]">
+      <div className="bg-white p-6 rounded-lg shadow-xl max-w-sm w-full mx-4 flex flex-col items-center">
+        <p className={`mb-4 text-center text-lg font-semibold ${isAlert ? 'text-blue-700' : 'text-gray-800'}`}>
+          {message}
+        </p>
+        <div className="flex space-x-4">
+          {isConfirm && (
+            <button
+              onClick={onCancel}
+              className="px-5 py-2 bg-gray-300 text-gray-800 rounded-lg hover:bg-gray-400 transition-colors duration-200"
+            >
+              Cancel
+            </button>
+          )}
+          {(isConfirm || isAlert) && (
+            <button
+              onClick={onConfirm}
+              className={`px-5 py-2 ${isConfirm ? 'bg-red-500 hover:bg-red-600' : 'bg-indigo-600 hover:bg-indigo-700'} text-white rounded-lg transition-colors duration-200`}
+            >
+              {isConfirm ? 'Confirm' : 'OK'}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// New Job Detail Modal Component
+// This component now accepts a 'mode' prop: 'view' or 'edit'
+const JobDetailModal = ({ job, mode, onSave, onCancel, showMessage, clearTextContent }) => {
+  const [formData, setFormData] = useState(job);
+
+  // Determine if fields should be read-only
+  const isViewMode = mode === 'view';
+
+  useEffect(() => {
+    // Update form data if the job prop changes (e.g., when viewing/editing a different job)
+    setFormData(job);
+  }, [job]);
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData({ ...formData, [name]: value });
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (isViewMode) { // If in view mode, submission doesn't make sense
+      onCancel(); // Just close the modal
+    } else {
+      onSave(formData); // Pass the updated form data to the parent's updateJob function
+    }
+  };
+
+  if (!job) return null; // Don't render if no job is selected
+
+  return (
+    <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-y-auto">
+      <div className="bg-white p-6 rounded-lg shadow-xl max-w-2xl w-full mx-auto my-8">
+        <h2 className="text-2xl font-bold text-indigo-800 mb-6 text-center">
+          {isViewMode ? 'Application Details' : 'Edit Application'}
+        </h2>
+        <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label htmlFor="modalCompany" className="block text-sm font-medium text-gray-700 mb-1">Company</label>
+            {isViewMode ? (
+              <p className="px-4 py-2 bg-gray-50 rounded-lg border border-gray-200">{formData.company}</p>
+            ) : (
+              <input
+                type="text"
+                id="modalCompany"
+                name="company"
+                value={formData.company}
+                onChange={handleChange}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 shadow-sm"
+                required
+              />
+            )}
+          </div>
+          <div>
+            <label htmlFor="modalTitle" className="block text-sm font-medium text-gray-700 mb-1">Job Title</label>
+            {isViewMode ? (
+              <p className="px-4 py-2 bg-gray-50 rounded-lg border border-gray-200">{formData.title}</p>
+            ) : (
+              <input
+                type="text"
+                id="modalTitle"
+                name="title"
+                value={formData.title}
+                onChange={handleChange}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 shadow-sm"
+                required
+              />
+            )}
+          </div>
+          <div>
+            <label htmlFor="modalStatus" className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+            {isViewMode ? (
+              <p className="px-4 py-2 bg-gray-50 rounded-lg border border-gray-200">{formData.status}</p>
+            ) : (
+              <select
+                id="modalStatus"
+                name="status"
+                value={formData.status}
+                onChange={handleChange}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 shadow-sm"
+              >
+                <option value="Applied">Applied</option>
+                <option value="Interview">Interview</option>
+                <option value="Offer">Offer</option>
+                <option value="Rejected">Rejected</option>
+                <option value="Accepted">Accepted</option>
+                <option value="Wishlist">Wishlist</option>
+              </select>
+            )}
+          </div>
+          <div>
+            <label htmlFor="modalDateApplied" className="block text-sm font-medium text-gray-700 mb-1">Date Applied</label>
+            {isViewMode ? (
+              <p className="px-4 py-2 bg-gray-50 rounded-lg border border-gray-200">{formData.dateApplied}</p>
+            ) : (
+              <input
+                type="date"
+                id="modalDateApplied"
+                name="dateApplied"
+                value={formData.dateApplied}
+                onChange={handleChange}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 shadow-sm"
+                required
+              />
+            )}
+          </div>
+          <div className="md:col-span-2">
+            <label htmlFor="modalNotes" className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+            {isViewMode ? (
+              <div className="px-4 py-2 bg-gray-50 rounded-lg border border-gray-200 whitespace-pre-wrap min-h-[50px]">{formData.notes || 'N/A'}</div>
+            ) : (
+              <textarea
+                id="modalNotes"
+                name="notes"
+                value={formData.notes}
+                onChange={handleChange}
+                rows="3"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 shadow-sm resize-y"
+              ></textarea>
+            )}
+          </div>
+
+          {/* Job Description (always shown in modal, but read-only in view mode) */}
+          <div className="md:col-span-2">
+            <label htmlFor="modalJobDescription" className="block text-sm font-medium text-gray-700 mb-1">Job Description</label>
+            {isViewMode ? (
+              <div className="px-4 py-2 bg-gray-50 rounded-lg border border-gray-200 whitespace-pre-wrap min-h-[100px]">{formData.jobDescription || 'N/A'}</div>
+            ) : (
+              <textarea
+                id="modalJobDescription"
+                name="jobDescription"
+                value={formData.jobDescription}
+                onChange={handleChange}
+                placeholder="Paste the full job description here..."
+                rows="5"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 shadow-sm resize-y"
+              ></textarea>
+            )}
+          </div>
+
+          {/* Resume Text (always shown in modal, but read-only in view mode) */}
+          <div className="md:col-span-1">
+            <label htmlFor="modalResumeText" className="block text-sm font-medium text-gray-700 mb-1">Resume Text</label>
+            {isViewMode ? (
+              <div className="px-4 py-2 bg-gray-50 rounded-lg border border-gray-200 whitespace-pre-wrap min-h-[100px]">{formData.resumeText || 'N/A'}</div>
+            ) : (
+              <textarea
+                id="modalResumeText"
+                name="resumeText"
+                value={formData.resumeText}
+                onChange={handleChange}
+                placeholder="Paste your resume content here..."
+                rows="5"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 shadow-sm resize-y"
+              ></textarea>
+            )}
+            {formData.resumeText && !isViewMode && (
+              <button
+                type="button"
+                onClick={() => clearTextContent('resume', setFormData, formData.id)}
+                className="mt-2 px-3 py-1 text-sm bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors"
+              >
+                Clear Resume Text
+              </button>
+            )}
+          </div>
+
+          {/* Cover Letter Text (always shown in modal, but read-only in view mode) */}
+          <div className="md:col-span-1">
+            <label htmlFor="modalCoverLetterText" className="block text-sm font-medium text-gray-700 mb-1">Cover Letter Text</label>
+            {isViewMode ? (
+              <div className="px-4 py-2 bg-gray-50 rounded-lg border border-gray-200 whitespace-pre-wrap min-h-[100px]">{formData.coverLetterText || 'N/A'}</div>
+            ) : (
+              <textarea
+                id="modalCoverLetterText"
+                name="coverLetterText"
+                value={formData.coverLetterText}
+                onChange={handleChange}
+                placeholder="Paste your cover letter content here..."
+                rows="5"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 shadow-sm resize-y"
+              ></textarea>
+            )}
+            {formData.coverLetterText && !isViewMode && (
+              <button
+                type="button"
+                onClick={() => clearTextContent('coverLetter', setFormData, formData.id)}
+                className="mt-2 px-3 py-1 text-sm bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors"
+              >
+                Clear Cover Letter Text
+              </button>
+            )}
+          </div>
+
+          <div className="md:col-span-2 flex justify-end space-x-2 mt-4">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="px-4 py-2 bg-gray-300 text-gray-800 rounded-lg hover:bg-gray-400 transition-colors duration-200"
+            >
+              {isViewMode ? 'Close' : 'Cancel'}
+            </button>
+            {!isViewMode && ( // Only show Save Changes in edit mode
+              <button
+                type="submit"
+                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors duration-200"
+              >
+                Save Changes
+              </button>
+            )}
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+
 const App = () => {
   const [db, setDb] = useState(null);
   const [auth, setAuth] = useState(null);
-  const [userId, setUserId] = useState(null); // User ID from Firebase Auth
-  const [userEmail, setUserEmail] = useState(null); // User email for display
+  const [userId, setUserId] = useState(null);
+  const [userEmail, setUserEmail] = useState(null);
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -47,7 +298,7 @@ const App = () => {
   // States for authentication UI
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [isRegistering, setIsRegistering] = useState(false); // Toggle between login/register
+  const [isRegistering, setIsRegistering] = useState(false);
 
   // State for the new job application form
   const [newJob, setNewJob] = useState({
@@ -56,10 +307,48 @@ const App = () => {
     status: 'Applied',
     dateApplied: '',
     notes: '',
+    jobDescription: '',
+    resumeText: '',
+    coverLetterText: '',
   });
 
-  // State for editing an existing job application
-  const [editingJob, setEditingJob] = useState(null);
+  // State for the job currently selected for viewing or editing
+  const [selectedJob, setSelectedJob] = useState(null);
+  // State to control the mode of the modal: 'view' or 'edit'
+  const [modalMode, setModalMode] = useState(null);
+
+
+  // Custom Modal states (for alerts/confirms)
+  const [modalMessage, setModalMessage] = useState('');
+  const [modalType, setModalType] = useState('alert'); // 'alert' or 'confirm'
+  const [modalResolve, setModalResolve] = useState(null); // Function to resolve the modal promise
+
+
+  // Function to show custom modal (for alerts/confirms)
+  const showModal = (message, type = 'alert') => {
+    return new Promise((resolve) => {
+      setModalMessage(message);
+      setModalType(type);
+      setModalResolve(() => resolve);
+    });
+  };
+
+  const handleModalConfirm = () => {
+    if (modalResolve) {
+      modalResolve(true);
+      setModalMessage('');
+      setModalResolve(null);
+    }
+  };
+
+  const handleModalCancel = () => {
+    if (modalResolve) {
+      modalResolve(false);
+      setModalMessage('');
+      setModalResolve(null);
+    }
+  };
+
 
   // Initialize Firebase and set up authentication listener
   useEffect(() => {
@@ -72,22 +361,20 @@ const App = () => {
         setDb(firestore);
         setAuth(firebaseAuth);
 
-        // Listen for auth state changes
         const unsubscribe = onAuthStateChanged(firebaseAuth, (user) => {
           if (user) {
             setUserId(user.uid);
-            setUserEmail(user.email); // Set email if available
-            setLoading(false); // Auth state determined
+            setUserEmail(user.email);
           } else {
-            // No user signed in, clear user data and indicate not loading
             setUserId(null);
             setUserEmail(null);
-            setLoading(false);
+            setJobs([]); // Clear jobs on logout
           }
-          setError(null); // Clear auth-related errors on state change
+          setLoading(false);
+          setError(null);
         });
 
-        return () => unsubscribe(); // Cleanup auth listener on unmount
+        return () => unsubscribe();
       } catch (err) {
         console.error("Error initializing Firebase:", err);
         setError("Failed to initialize the application. Check your Firebase config.");
@@ -103,18 +390,16 @@ const App = () => {
     if (db && userId) {
       setLoading(true);
       setError(null);
-      // Construct the collection path for private user data
       const jobsCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/jobApplications`);
-      // Create a query to order jobs by dateApplied (descending)
       const q = query(jobsCollectionRef, orderBy('dateApplied', 'desc'));
 
-      // Subscribe to real-time updates from Firestore
       const unsubscribe = onSnapshot(q, (snapshot) => {
         const fetchedJobs = snapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data(),
-          // Ensure dateApplied is formatted as a string for input fields
-          dateApplied: doc.data().dateApplied?.toDate ? doc.data().dateApplied.toDate().toISOString().split('T')[0] : doc.data().dateApplied,
+          dateApplied: (doc.data().dateApplied && typeof doc.data().dateApplied.toDate === 'function')
+            ? doc.data().dateApplied.toDate().toISOString().split('T')[0]
+            : doc.data().dateApplied,
         }));
         setJobs(fetchedJobs);
         setLoading(false);
@@ -124,9 +409,8 @@ const App = () => {
         setLoading(false);
       });
 
-      return () => unsubscribe(); // Cleanup snapshot listener when component unmounts or dependencies change
+      return () => unsubscribe();
     } else {
-      // If no user is logged in, clear jobs and indicate not loading
       setJobs([]);
       setLoading(false);
     }
@@ -138,17 +422,36 @@ const App = () => {
     setNewJob({ ...newJob, [name]: value });
   };
 
-  // Handle changes in the editing job form inputs
-  const handleEditJobChange = (e) => {
-    const { name, value } = e.target;
-    setEditingJob({ ...editingJob, [name]: value });
+  // Helper function to clear text content (used in Add and Edit forms/modal)
+  const clearTextContent = async (type, setStateFunc, jobId = null) => {
+    const confirm = await showModal(`Are you sure you want to clear this ${type} content?`, 'confirm');
+    if (!confirm) return;
+
+    if (jobId) { // If a jobId is provided, it means we are clearing content in the modal for an existing job
+      setStateFunc(prevFormData => ({
+        ...prevFormData,
+        [`${type}Text`]: '',
+      }));
+      // Also update the main jobs list to reflect the change visually without a full reload
+      setJobs(prevJobs => prevJobs.map(job =>
+        job.id === jobId ? { ...job, [`${type}Text`]: '' } : job
+      ));
+    } else { // For the new job form
+      setStateFunc(prevState => ({
+        ...prevState,
+        [`${type}Text`]: '',
+      }));
+    }
+    setError(null);
+    showModal(`${type.charAt(0).toUpperCase() + type.slice(1)} content cleared successfully!`, 'alert');
   };
+
 
   // Add a new job application
   const addJob = async (e) => {
     e.preventDefault();
     if (!db || !userId) {
-      setError("Please sign in to add job applications.");
+      showModal("Please sign in to add job applications.", 'alert');
       return;
     }
     if (!newJob.company || !newJob.title || !newJob.dateApplied) {
@@ -156,16 +459,28 @@ const App = () => {
       return;
     }
 
+    setLoading(true);
+    setError(null);
+
     try {
-      setLoading(true);
-      setError(null);
       const jobsCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/jobApplications`);
       await addDoc(jobsCollectionRef, {
-        ...newJob,
-        dateApplied: new Date(newJob.dateApplied), // Convert to Firestore Timestamp
-        createdAt: serverTimestamp(), // Add a timestamp for creation
+        company: newJob.company,
+        title: newJob.title,
+        status: newJob.status,
+        dateApplied: new Date(newJob.dateApplied),
+        notes: newJob.notes,
+        jobDescription: newJob.jobDescription,
+        resumeText: newJob.resumeText,
+        coverLetterText: newJob.coverLetterText,
+        createdAt: serverTimestamp(),
       });
-      setNewJob({ company: '', title: '', status: 'Applied', dateApplied: '', notes: '' }); // Reset form
+      setNewJob({ // Reset form
+        company: '', title: '', status: 'Applied', dateApplied: '', notes: '', jobDescription: '',
+        resumeText: '', coverLetterText: '',
+      });
+
+      showModal('Job application added successfully!', 'alert');
     } catch (err) {
       console.error("Error adding job:", err);
       setError("Failed to add job application.");
@@ -174,35 +489,48 @@ const App = () => {
     }
   };
 
-  // Set the job to be edited
+  // Function to open the modal in 'edit' mode
   const startEditing = (job) => {
-    setEditingJob({ ...job });
+    setSelectedJob({ ...job }); // Set the job data
+    setModalMode('edit');       // Set the modal mode to 'edit'
   };
 
-  // Update an existing job application
-  const updateJob = async (e) => {
-    e.preventDefault();
-    if (!db || !userId || !editingJob) {
-      setError("Please sign in to update job applications or no job selected for editing.");
+  // Function to open the modal in 'view' mode
+  const startViewing = (job) => {
+    setSelectedJob({ ...job }); // Set the job data
+    setModalMode('view');       // Set the modal mode to 'view'
+  };
+
+
+  // Update an existing job application (called from modal)
+  const updateJob = async (updatedData) => {
+    if (!db || !userId || !updatedData || !updatedData.id) {
+      showModal("Please sign in to update job applications or no job selected for editing.", 'alert');
       return;
     }
-    if (!editingJob.company || !editingJob.title || !editingJob.dateApplied) {
+    if (!updatedData.company || !updatedData.title || !updatedData.dateApplied) {
       setError("Company, Title, and Date Applied are required for update.");
       return;
     }
 
+    setLoading(true);
+    setError(null);
+
     try {
-      setLoading(true);
-      setError(null);
-      const jobDocRef = doc(db, `artifacts/${appId}/users/${userId}/jobApplications`, editingJob.id);
+      const jobDocRef = doc(db, `artifacts/${appId}/users/${userId}/jobApplications`, updatedData.id);
       await updateDoc(jobDocRef, {
-        company: editingJob.company,
-        title: editingJob.title,
-        status: editingJob.status,
-        dateApplied: new Date(editingJob.dateApplied), // Convert to Firestore Timestamp
-        notes: editingJob.notes,
+        company: updatedData.company,
+        title: updatedData.title,
+        status: updatedData.status,
+        dateApplied: new Date(updatedData.dateApplied),
+        notes: updatedData.notes,
+        jobDescription: updatedData.jobDescription,
+        resumeText: updatedData.resumeText,
+        coverLetterText: updatedData.coverLetterText,
       });
-      setEditingJob(null); // Exit editing mode
+      setSelectedJob(null); // Close modal
+      setModalMode(null);    // Clear modal mode
+      showModal('Job application updated successfully!', 'alert');
     } catch (err) {
       console.error("Error updating job:", err);
       setError("Failed to update job application.");
@@ -214,44 +542,20 @@ const App = () => {
   // Delete a job application
   const deleteJob = async (id) => {
     if (!db || !userId) {
-      setError("Please sign in to delete job applications.");
+      showModal("Please sign in to delete job applications.", 'alert');
       return;
     }
 
-    // Custom confirmation modal implementation
-    const confirmDelete = await new Promise(resolve => {
-      const modal = document.createElement('div');
-      modal.className = 'fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50';
-      modal.innerHTML = `
-        <div class="bg-white p-6 rounded-lg shadow-xl max-w-sm w-full mx-4 flex flex-col items-center">
-          <p class="mb-4 text-center text-lg font-semibold">Are you sure you want to delete this job application?</p>
-          <div class="flex space-x-4">
-            <button id="cancelBtn" class="px-5 py-2 bg-gray-300 text-gray-800 rounded-lg hover:bg-gray-400 transition-colors duration-200">Cancel</button>
-            <button id="confirmBtn" class="px-5 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors duration-200">Delete</button>
-          </div>
-        </div>
-      `;
-      document.body.appendChild(modal);
+    const confirm = await showModal("Are you sure you want to delete this job application?", 'confirm');
+    if (!confirm) return;
 
-      document.getElementById('confirmBtn').onclick = () => {
-        document.body.removeChild(modal);
-        resolve(true);
-      };
-      document.getElementById('cancelBtn').onclick = () => {
-        document.body.removeChild(modal);
-        resolve(false);
-      };
-    });
-
-    if (!confirmDelete) {
-      return;
-    }
+    setLoading(true);
+    setError(null);
 
     try {
-      setLoading(true);
-      setError(null);
       const jobDocRef = doc(db, `artifacts/${appId}/users/${userId}/jobApplications`, id);
       await deleteDoc(jobDocRef);
+      showModal('Job application deleted successfully!', 'alert');
     } catch (err) {
       console.error("Error deleting job:", err);
       setError("Failed to delete job application.");
@@ -268,12 +572,10 @@ const App = () => {
     try {
       if (isRegistering) {
         await createUserWithEmailAndPassword(auth, email, password);
-        // Using a simple alert for now, consider a custom modal/toast for production
-        alert('Registration successful! You are now logged in.');
+        showModal('Registration successful! You are now logged in.', 'alert');
       } else {
         await signInWithEmailAndPassword(auth, email, password);
-        // Using a simple alert for now, consider a custom modal/toast for production
-        alert('Login successful!');
+        showModal('Login successful!', 'alert');
       }
       setEmail('');
       setPassword('');
@@ -291,10 +593,10 @@ const App = () => {
     setError(null);
     try {
       await signOut(auth);
-      setJobs([]); // Clear jobs on logout
-      setEditingJob(null); // Clear editing state
-      // Using a simple alert for now, consider a custom modal/toast for production
-      alert('You have been signed out.');
+      setJobs([]);
+      setSelectedJob(null); // Close modal on logout
+      setModalMode(null);    // Clear modal mode
+      showModal('You have been signed out.', 'alert');
     } catch (err) {
       console.error("Logout error:", err);
       setError(`Logout failed: ${err.message}`);
@@ -303,8 +605,28 @@ const App = () => {
     }
   };
 
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-100 to-purple-100 p-4 font-sans antialiased">
+      <CustomModal
+        message={modalMessage}
+        type={modalType}
+        onConfirm={handleModalConfirm}
+        onCancel={handleModalCancel}
+      />
+
+      {/* Job Detail/Edit Modal */}
+      {selectedJob && modalMode && ( // Render modal if a job is selected and mode is set
+        <JobDetailModal
+          job={selectedJob}
+          mode={modalMode} // Pass the current mode ('view' or 'edit')
+          onSave={updateJob}
+          onCancel={() => { setSelectedJob(null); setModalMode(null); }} // Close modal
+          showMessage={showModal} // Pass showModal for internal modal messages
+          clearTextContent={clearTextContent} // Pass clearTextContent
+        />
+      )}
+
       <div className="max-w-4xl mx-auto bg-white rounded-xl shadow-lg p-6 md:p-8">
         <h1 className="text-3xl md:text-4xl font-extrabold text-gray-900 mb-6 text-center">
           💼 Job Application Tracker
@@ -464,6 +786,67 @@ const App = () => {
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 shadow-sm resize-y"
                   ></textarea>
                 </div>
+
+                {/* Job Description for New Job */}
+                <div className="md:col-span-2">
+                  <label htmlFor="jobDescription" className="block text-sm font-medium text-gray-700 mb-1">Job Description</label>
+                  <textarea
+                    id="jobDescription"
+                    name="jobDescription"
+                    value={newJob.jobDescription}
+                    onChange={handleNewJobChange}
+                    placeholder="Paste the full job description here..."
+                    rows="5"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 shadow-sm resize-y"
+                  ></textarea>
+                </div>
+
+                {/* Resume Text Area for New Job */}
+                <div className="md:col-span-1">
+                  <label htmlFor="resumeText" className="block text-sm font-medium text-gray-700 mb-1">Resume Text</label>
+                  <textarea
+                    id="resumeText"
+                    name="resumeText"
+                    value={newJob.resumeText}
+                    onChange={handleNewJobChange}
+                    placeholder="Paste your resume content here..."
+                    rows="5"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 shadow-sm resize-y"
+                  ></textarea>
+                  {newJob.resumeText && (
+                    <button
+                      type="button"
+                      onClick={() => clearTextContent('resume', setNewJob)}
+                      className="mt-2 px-3 py-1 text-sm bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors"
+                    >
+                      Clear Resume Text
+                    </button>
+                  )}
+                </div>
+
+                {/* Cover Letter Text Area for New Job */}
+                <div className="md:col-span-1">
+                  <label htmlFor="coverLetterText" className="block text-sm font-medium text-gray-700 mb-1">Cover Letter Text</label>
+                  <textarea
+                    id="coverLetterText"
+                    name="coverLetterText"
+                    value={newJob.coverLetterText}
+                    onChange={handleNewJobChange}
+                    placeholder="Paste your cover letter content here..."
+                    rows="5"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 shadow-sm resize-y"
+                  ></textarea>
+                  {newJob.coverLetterText && (
+                    <button
+                      type="button"
+                      onClick={() => clearTextContent('coverLetter', setNewJob)}
+                      className="mt-2 px-3 py-1 text-sm bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors"
+                    >
+                      Clear Cover Letter Text
+                    </button>
+                  )}
+                </div>
+
                 <div className="md:col-span-2 text-center">
                   <button
                     type="submit"
@@ -484,125 +867,48 @@ const App = () => {
             <div className="space-y-4">
               {jobs.map((job) => (
                 <div key={job.id} className="bg-white p-5 rounded-lg shadow-md border border-gray-200">
-                  {editingJob && editingJob.id === job.id ? (
-                    // Edit Form
-                    <form onSubmit={updateJob} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label htmlFor="editCompany" className="block text-sm font-medium text-gray-700 mb-1">Company</label>
-                        <input
-                          type="text"
-                          id="editCompany"
-                          name="company"
-                          value={editingJob.company}
-                          onChange={handleEditJobChange}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 shadow-sm"
-                          required
-                        />
-                      </div>
-                      <div>
-                        <label htmlFor="editTitle" className="block text-sm font-medium text-gray-700 mb-1">Job Title</label>
-                        <input
-                          type="text"
-                          id="editTitle"
-                          name="title"
-                          value={editingJob.title}
-                          onChange={handleEditJobChange}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 shadow-sm"
-                          required
-                        />
-                      </div>
-                      <div>
-                        <label htmlFor="editStatus" className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-                        <select
-                          id="editStatus"
-                          name="status"
-                          value={editingJob.status}
-                          onChange={handleEditJobChange}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 shadow-sm"
-                        >
-                          <option value="Applied">Applied</option>
-                          <option value="Interview">Interview</option>
-                          <option value="Offer">Offer</option>
-                          <option value="Rejected">Rejected</option>
-                          <option value="Accepted">Accepted</option>
-                          <option value="Wishlist">Wishlist</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label htmlFor="editDateApplied" className="block text-sm font-medium text-gray-700 mb-1">Date Applied</label>
-                        <input
-                          type="date"
-                          id="editDateApplied"
-                          name="dateApplied"
-                          value={editingJob.dateApplied}
-                          onChange={handleEditJobChange}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 shadow-sm"
-                          required
-                        />
-                      </div>
-                      <div className="md:col-span-2">
-                        <label htmlFor="editNotes" className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-                        <textarea
-                          id="editNotes"
-                          name="notes"
-                          value={editingJob.notes}
-                          onChange={handleEditJobChange}
-                          rows="3"
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 shadow-sm resize-y"
-                        ></textarea>
-                      </div>
-                      <div className="md:col-span-2 flex justify-end space-x-2">
-                        <button
-                          type="button"
-                          onClick={() => setEditingJob(null)}
-                          className="px-4 py-2 bg-gray-300 text-gray-800 rounded-lg hover:bg-gray-400 transition-colors duration-200"
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          type="submit"
-                          className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors duration-200"
-                        >
-                          Save Changes
-                        </button>
-                      </div>
-                    </form>
-                  ) : (
-                    // Display Job Details
-                    <>
-                      <div className="flex items-center justify-between mb-2">
-                        <h3 className="text-xl font-semibold text-gray-900">{job.title} at {job.company}</h3>
-                        <span className={`px-3 py-1 text-sm font-medium rounded-full
-                          ${job.status === 'Applied' ? 'bg-blue-100 text-blue-800' : ''}
-                          ${job.status === 'Interview' ? 'bg-purple-100 text-purple-800' : ''}
-                          ${job.status === 'Offer' ? 'bg-green-100 text-green-800' : ''}
-                          ${job.status === 'Rejected' ? 'bg-red-100 text-red-800' : ''}
-                          ${job.status === 'Accepted' ? 'bg-teal-100 text-teal-800' : ''}
-                          ${job.status === 'Wishlist' ? 'bg-yellow-100 text-yellow-800' : ''}
-                        `}>
-                          {job.status}
-                        </span>
-                      </div>
-                      <p className="text-gray-600 mb-2">Applied on: <span className="font-medium">{job.dateApplied}</span></p>
-                      {job.notes && (
-                        <p className="text-gray-700 text-sm mb-3 whitespace-pre-wrap">{job.notes}</p>
-                      )}
-                      <div className="flex space-x-2 justify-end">
-                        <button
-                          onClick={() => startEditing(job)}
-                          className="px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition-colors duration-200"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          onClick={() => deleteJob(job.id)}
-                          className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors duration-200"
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </>
-                  )}
+                  {/* Display Job Details (Regular view - only essential info) */}
+                  <>
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="text-xl font-semibold text-gray-900">{job.title} at {job.company}</h3>
+                      <span className={`px-3 py-1 text-sm font-medium rounded-full
+                        ${job.status === 'Applied' ? 'bg-blue-100 text-blue-800' : ''}
+                        ${job.status === 'Interview' ? 'bg-purple-100 text-purple-800' : ''}
+                        ${job.status === 'Offer' ? 'bg-green-100 text-green-800' : ''}
+                        ${job.status === 'Rejected' ? 'bg-red-100 text-red-800' : ''}
+                        ${job.status === 'Accepted' ? 'bg-teal-100 text-teal-800' : ''}
+                        ${job.status === 'Wishlist' ? 'bg-yellow-100 text-yellow-800' : ''}
+                      `}>
+                        {job.status}
+                      </span>
+                    </div>
+                    <p className="text-gray-600 mb-2">Applied on: <span className="font-medium">{job.dateApplied}</span></p>
+                    {job.notes && (
+                      <p className="text-gray-700 text-sm mb-3 whitespace-pre-wrap">{job.notes}</p>
+                    )}
+
+                    <div className="flex space-x-2 justify-end mt-4">
+                      {/* New View Details Button */}
+                      <button
+                        onClick={() => startViewing(job)}
+                        className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors duration-200"
+                      >
+                        View Details
+                      </button>
+                      <button
+                        onClick={() => startEditing(job)}
+                        className="px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition-colors duration-200"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => deleteJob(job.id)}
+                        className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors duration-200"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </>
                 </div>
               ))}
             </div>
